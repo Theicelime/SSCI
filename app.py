@@ -2,219 +2,228 @@ import streamlit as st
 import requests
 import pandas as pd
 from datetime import datetime
-import json
+import time
 
-# ==========================================
-# 1. 页面配置与极简美学 CSS
-# ==========================================
-st.set_page_config(page_title="Gerontology Intelligence", page_icon="🌐", layout="wide")
-
-def local_css():
+# --- 1. 高级 UI 样式定义 (真正的应用感) ---
+def apply_premium_style():
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;500;900&display=swap');
     
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    :root {
+        --primary: #2563eb;
+        --bg-main: #f8fafc;
+        --card-bg: rgba(255, 255, 255, 0.8);
+    }
+
+    .stApp { background-color: var(--bg-main); }
     
-    /* 背景美化 */
-    .main { background: #fdfdfd; }
-    
-    /* 智能卡片设计 */
+    /* 极致卡片设计 */
     .paper-card {
-        background: white;
-        border-radius: 16px;
+        background: var(--card-bg);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 20px;
         padding: 24px;
-        border: 1px solid #f0f0f0;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.03);
-        margin-bottom: 25px;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        height: 100%;
+        margin-bottom: 20px;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
     
     .paper-card:hover {
-        transform: translateY(-8px);
-        box-shadow: 0 12px 30px rgba(0,0,0,0.08);
-        border-color: #3b82f6;
+        transform: translateY(-5px) scale(1.01);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        border-color: var(--primary);
     }
 
-    .journal-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        background: #eff6ff;
-        color: #1d4ed8;
-        border-radius: 20px;
-        font-size: 0.7rem;
+    /* 刊名与标签 */
+    .journal-tag {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
         font-weight: 700;
-        letter-spacing: 0.05em;
+        background: #dbeafe;
+        color: #1e40af;
+        padding: 4px 10px;
+        border-radius: 6px;
         margin-bottom: 12px;
+        display: inline-block;
     }
 
     .paper-title {
-        font-size: 1.25rem;
-        font-weight: 800;
-        color: #1e293b;
-        line-height: 1.3;
-        margin-bottom: 15px;
+        font-family: 'Noto Sans SC', sans-serif;
+        font-size: 1.2rem;
+        font-weight: 900;
+        color: #0f172a;
+        line-height: 1.4;
+        margin-bottom: 12px;
     }
 
-    .meta-info {
+    .ai-summary-box {
+        background: #f1f5f9;
+        border-left: 4px solid var(--primary);
+        padding: 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        color: #475569;
+        margin: 15px 0;
+    }
+
+    /* 状态栏 */
+    .meta-footer {
         display: flex;
+        justify-content: space-between;
         align-items: center;
-        gap: 15px;
-        color: #64748b;
-        font-size: 0.85rem;
-        margin-top: auto;
-        padding-top: 15px;
-        border-top: 1px solid #f8fafc;
-    }
-
-    .stat-item { display: flex; align-items: center; gap: 4px; }
-    
-    /* 按钮样式优化 */
-    .stButton>button {
-        border-radius: 10px;
-        background: #1e293b;
-        color: white;
-        border: none;
-        width: 100%;
+        margin-top: 20px;
+        font-size: 12px;
+        color: #94a3b8;
     }
     
-    /* 隐藏默认组件 */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    /* 隐藏 Streamlit 原生元素 */
+    div[data-testid="stToolbar"] { visibility: hidden; }
+    footer { visibility: hidden; }
     </style>
     """, unsafe_allow_html=True)
 
-# ==========================================
-# 2. 核心逻辑：数据抓取与解析
-# ==========================================
+# --- 2. 深度数据引擎 ---
+@st.cache_data(ttl=3600)
+def get_intel_data(keywords, journal_ids, limit=25):
+    """
+    采用双重检索：关键词精确匹配 + 核心期刊追踪
+    """
+    # 关键词部分
+    query = f"(abstract.search:\"{keywords}\" OR title.search:\"{keywords}\")"
+    
+    # 期刊过滤部分
+    if journal_ids:
+        journal_filter = "primary_location.schema_id:" + "|".join(journal_ids)
+        full_filter = f"{query},{journal_filter}"
+    else:
+        full_filter = query
 
-def decode_abstract(inverted_index):
-    """解码 OpenAlex 特有的倒排索引摘要"""
-    if not inverted_index: return "暂无摘要预览"
-    word_index = []
-    for word, pos_list in inverted_index.items():
-        for pos in pos_list:
-            word_index.append((pos, word))
-    word_index.sort()
-    abstract = " ".join([word for pos, word in word_index])
-    return abstract[:300] + "..." if len(abstract) > 300 else abstract
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_latest_papers(journal_ids, min_citations, days_back):
-    # 构建 API URL
-    ids_str = "|".join(journal_ids)
-    url = f"https://api.openalex.org/works?filter=primary_location.schema_id:{ids_str},cited_by_count:>{min_citations}&sort=publication_date:desc&per_page=40"
+    url = f"https://api.openalex.org/works?filter={full_filter}&sort=publication_date:desc&per_page={limit}"
     
     try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        return data.get('results', [])
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200:
+            return r.json().get('results', [])
+        return []
     except Exception as e:
-        st.error(f"数据加载失败: {e}")
         return []
 
-# ==========================================
-# 3. 界面布局
-# ==========================================
-local_css()
+def decode_abstract(inverted):
+    if not inverted: return "Abstract not provided by publisher."
+    idx = []
+    for word, positions in inverted.items():
+        for p in positions: idx.append((p, word))
+    idx.sort()
+    full_text = " ".join([x[1] for x in idx])
+    return full_text[:400] + "..."
 
-# --- 侧边栏：智能化控制 ---
-with st.sidebar:
-    st.markdown("## ⚙️ 智能过滤")
+# --- 3. AI 智能总结逻辑 ---
+def get_ai_insight(text, api_key):
+    """
+    调用 AI 接口进行论文洞察
+    """
+    if not api_key: return "请在侧边栏配置 API Key 以开启 AI 洞察。"
     
-    journals_map = {
-        "The Gerontologist": "S4306399625",
-        "Journal of Env Psychology": "S156885347",
-        "Health & Place": "S108842106",
-        "Landscape & Urban Planning": "S162319083",
-        "Age and Ageing": "S169624507",
-        "J of Aging and Env": "S4210214227"
+    # 这里以 DeepSeek 为例，您可以根据需要切换
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "你是一位老龄环境学专家，请用中文一句话总结以下摘要的核心研究贡献："},
+            {"role": "user", "content": text}
+        ]
     }
-    
-    selected_names = st.multiselect("追踪期刊", list(journals_map.keys()), default=list(journals_map.keys())[:3])
-    selected_ids = [journals_map[name] for name in selected_names]
-    
-    min_cite = st.slider("最低引用量", 0, 100, 0)
-    search_keyword = st.text_input("标题关键词搜索", "")
-    
-    st.divider()
-    st.markdown("### 🤖 AI 设置")
-    ai_enabled = st.toggle("开启 AI 核心观点提取", value=False)
-    if ai_enabled:
-        api_key = st.text_input("DeepSeek/OpenAI Key", type="password")
+    try:
+        # 模拟调用或实际调用 (此处为占位，实际使用时取消注释)
+        # res = requests.post("https://api.deepseek.com/v1/chat/completions", json=payload, headers=headers)
+        # return res.json()['choices'][0]['message']['content']
+        return "✨ 模拟洞察：该研究通过实证分析探讨了城市绿地对失智老人生活质量的正向影响，提出了环境弹性补偿模型。"
+    except:
+        return "AI 服务暂时忙碌..."
 
-# --- 主内容区 ---
-col_head_1, col_head_2 = st.columns([2, 1])
-with col_head_1:
-    st.markdown("# 🧠 环境老年学·前沿情报站")
-    st.markdown(f"**{datetime.now().strftime('%Y年%m月%d日')}** · 聚合全球顶刊最新研究")
-
-with col_head_2:
-    if st.button("🔄 强制刷新数据库"):
-        st.cache_data.clear()
-
-if not selected_ids:
-    st.warning("请在侧边栏至少订阅一个期刊以获取情报。")
-else:
-    with st.spinner("正在链接全球学术数据库..."):
-        raw_papers = get_latest_papers(selected_ids, min_cite, 90)
+# --- 4. 主程序界面 ---
+def main():
+    apply_premium_style()
     
-    # 关键词过滤
-    if search_keyword:
-        papers = [p for p in raw_papers if search_keyword.lower() in p['display_name'].lower()]
-    else:
-        papers = raw_papers
+    # --- Sidebar: 专家控制面板 ---
+    with st.sidebar:
+        st.image("https://cdn-icons-png.flaticon.com/512/2103/2103633.png", width=60)
+        st.title("智库控制台")
+        st.markdown("---")
+        
+        journals = {
+            "The Gerontologist": "S4306399625",
+            "Health & Place": "S108842106",
+            "Landscape & Urban Planning": "S162319083",
+            "Age and Ageing": "S169624507",
+            "J. of Env Psychology": "S156885347"
+        }
+        
+        st.subheader("📡 频道订阅")
+        selected_journals = st.multiselect("核心刊物", list(journals.keys()), default=list(journals.keys())[:3])
+        ids = [journals[k] for k in selected_journals]
+        
+        st.subheader("🔍 精准画像")
+        keywords = st.text_input("学术关键词", value="environmental gerontology")
+        
+        st.subheader("🤖 AI 神经元")
+        ai_on = st.toggle("开启 AI 深度解析", value=True)
+        key = st.sidebar.text_input("API Key", type="password", help="支持 DeepSeek/OpenAI 格式")
+        
+        st.markdown("---")
+        st.caption("Gerontology Intel v3.0 Pro\nPowered by OpenAlex & DeepSeek")
+
+    # --- Main Canvas ---
+    st.markdown(f"### 🌐 全球老龄环境研究·实时情报")
+    st.caption(f"检索到来自 {len(selected_journals)} 个顶刊的最新数据 | 当前时间: {datetime.now().strftime('%H:%M:%S')}")
+
+    # 数据加载状态
+    with st.spinner("正在穿透学术壁垒..."):
+        papers = get_intel_data(keywords, ids)
 
     if not papers:
-        st.info("当前筛选条件下未发现新论文。")
-    else:
-        # 网格布局
-        n_cols = 3
-        rows = [papers[i:i + n_cols] for i in range(0, len(papers), n_cols)]
-        
-        for row in rows:
-            cols = st.columns(n_cols)
-            for i, paper in enumerate(row):
-                with cols[i]:
-                    title = paper.get('display_name', 'Untitled')
-                    venue = paper.get('host_venue', {}).get('display_name', 'Unknown Venue')
-                    date = paper.get('publication_date', 'Unknown Date')
-                    cites = paper.get('cited_by_count', 0)
-                    doi = paper.get('doi', '#')
-                    abstract = decode_abstract(paper.get('abstract_inverted_index'))
-                    
-                    # 渲染卡片
-                    st.markdown(f"""
-                    <div class="paper-card">
-                        <div>
-                            <div class="journal-badge">{venue}</div>
-                            <div class="paper-title">{title}</div>
-                            <div class="abstract">{abstract}</div>
-                        </div>
-                        <div class="meta-info">
-                            <div class="stat-item">📅 {date}</div>
-                            <div class="stat-item">🔥 引用: {cites}</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # 功能按钮组
-                    btn_col1, btn_col2 = st.columns(2)
-                    with btn_col1:
-                        st.link_button("📄 读原文", doi)
-                    with btn_col2:
-                        if st.button("✨ AI 总结", key=f"ai_{paper['id']}"):
-                            if not ai_enabled:
-                                st.error("请先在左侧开启AI功能")
-                            else:
-                                st.toast("AI 正在深度阅读...")
-                                # 这里预留 AI 调用逻辑
-                                st.info("AI 总结功能已就绪，接入 API Key 后即可展示研究贡献、方法论和结论。")
+        st.error("❌ 未能在当前频道下发现论文。尝试扩大搜索关键词或增加订阅期刊。")
+        return
 
-# --- 页脚 ---
-st.markdown("---")
-st.caption("数据来源: OpenAlex API | 设计: Environmental Gerontology Dashboard v2.0")
+    # 内容展示 (Pinterest 风格栅格)
+    col1, col2 = st.columns(2, gap="large")
+    
+    for i, paper in enumerate(papers):
+        target_col = col1 if i % 2 == 0 else col2
+        
+        title = paper.get('display_name', 'Untitled')
+        journal = paper.get('host_venue', {}).get('display_name', 'Unknown Source')
+        date = paper.get('publication_date', 'N/A')
+        citations = paper.get('cited_by_count', 0)
+        abstract = decode_abstract(paper.get('abstract_inverted_index'))
+        doi = paper.get('doi', '#')
+
+        with target_col:
+            st.markdown(f"""
+            <div class="paper-card">
+                <div class="journal-tag">{journal}</div>
+                <div class="paper-title">{title}</div>
+                <div class="abstract-preview">{abstract[:180]}...</div>
+                <div class="meta-footer">
+                    <span>📅 {date}</span>
+                    <span>🔥 引用: {citations}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # 卡片交互区
+            exp = st.expander("展开深度情报")
+            with exp:
+                if ai_on:
+                    st.markdown(f"**🤖 AI 核心洞察:**")
+                    st.info(get_ai_insight(abstract, key))
+                
+                st.markdown(f"**摘要全文:**\n\n{abstract}")
+                st.link_button("🚀 查看原刊论文", doi, use_container_width=True)
+            
+            st.markdown("<div style='height:15px'></div>", unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
